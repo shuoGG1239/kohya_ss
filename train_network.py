@@ -90,20 +90,25 @@ def train(args):
   accelerator, unwrap_model = train_util.prepare_accelerator(args)
 
   # mixed precisionに対応した型を用意しておき適宜castする
+  # float16, float16
   weight_dtype, save_dtype = train_util.prepare_dtype(args)
 
   # モデルを読み込む
+  # 加载底模
   text_encoder, vae, unet, _ = train_util.load_target_model(args, weight_dtype)
 
   # work on low-ram device
+  # 低内存模式(默认关) 该模式下会将 U-net 文本编码器 VAE 转移到 GPU 显存中 启用该模式可能会对显存有一定影响
   if args.lowram:
     text_encoder.to("cuda")
     unet.to("cuda")
 
   # モデルに xformers とか memory efficient attention を組み込む
+  # 本质只是做了 import xformers.ops
   train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers)
 
   # 学習を準備する
+  # 默认开
   if cache_latents:
     vae.to(accelerator.device, dtype=weight_dtype)
     vae.requires_grad_(False)
@@ -117,27 +122,37 @@ def train(args):
 
   # prepare network
   print("import network module:", args.network_module)
-  network_module = importlib.import_module(args.network_module)
+  network_module = importlib.import_module(args.network_module)  # networks.lora or lycoris.kohya
 
   net_kwargs = {}
   if args.network_args is not None:
     for net_arg in args.network_args:
-      key, value = net_arg.split('=')
+      key, value = net_arg.split('=') # algo='loha';conv_dim=4;conv_alpha=4
       net_kwargs[key] = value
 
   # if a new network is added in future, add if ~ then blocks for each network (;'∀')
+  # create_network(1.0, 128, 128, vae, clip, unet, net_kwargs)
   network = network_module.create_network(1.0, args.network_dim, args.network_alpha, vae, text_encoder, unet, **net_kwargs)
   if network is None:
     return
 
+  # 默认为空: pretrained weights for LoRA network | 若需要从已有的 LoRA 模型上继续训练，请填写 LoRA 模型路径
   if args.network_weights is not None:
     print("load network weights from:", args.network_weights)
     network.load_weights(args.network_weights)
 
-  train_unet = not args.network_train_text_encoder_only
-  train_text_encoder = not args.network_train_unet_only
+  train_unet = not args.network_train_text_encoder_only # True
+  train_text_encoder = not args.network_train_unet_only # True
+  # network.apply_to(clip, unet, True, True)
   network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
 
+  # 默认关
+  """
+  梯度检查点（gradient checkpointing）的工作原理是从计算图中省略一些激活值
+  （由前向传播产生，其中这里的”一些“是指可以只省略模型中的部分激活值，折中时间和空间，
+  即前向传播的时候存一个节点释放一个节点，空的那个等需要用的时候再backword的时候重新计算）。
+  这减少了计算图使用的内存，降低了总体内存压力（并允许在处理过程中使用更大的批次大小
+  """
   if args.gradient_checkpointing:
     unet.enable_gradient_checkpointing()
     text_encoder.gradient_checkpointing_enable()

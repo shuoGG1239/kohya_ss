@@ -268,6 +268,12 @@ class BaseDataset(torch.utils.data.Dataset):
     self.tag_dropout_rate = tag_dropout_rate
 
   def set_tag_frequency(self, dir_name, captions):
+    """
+    统计所有图片的所有tag的出现频率(文件夹分开), 统计放在map tag_frequency中
+    eg: 有2个文件夹: 6_white_legwear和 6_black_legwear, 则
+    tag_frequency["6_white_legwear"] = tag2Frequence1
+    tag_frequency["6_black_legwear"] = tag2Frequence2
+    """
     frequency_for_dir = self.tag_frequency.get(dir_name, {})
     self.tag_frequency[dir_name] = frequency_for_dir
     for caption in captions:
@@ -377,6 +383,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
   def make_buckets(self):
     '''
+    根据分辨率分成多个bucket
     bucketingを行わない場合も呼び出し必須（ひとつだけbucketを作る）
     min_size and max_size are ignored when enable_bucket is False
     '''
@@ -685,6 +692,9 @@ class DreamBoothDataset(BaseDataset):
   def __init__(self, batch_size, train_data_dir, reg_data_dir, tokenizer, max_token_length, caption_extension, shuffle_caption, shuffle_keep_tokens, resolution, enable_bucket, min_bucket_reso, max_bucket_reso, bucket_reso_steps, bucket_no_upscale, prior_loss_weight, flip_aug, color_aug, face_crop_aug_range, random_crop, debug_dataset) -> None:
     super().__init__(tokenizer, max_token_length, shuffle_caption, shuffle_keep_tokens,
                      resolution, flip_aug, color_aug, face_crop_aug_range, random_crop, debug_dataset)
+    """
+    加载各个文件夹里面的训练图片和tag文件, 统计tag出现次数
+    """
 
     assert resolution is not None, f"resolution is required / resolution（解像度）指定は必須です"
 
@@ -708,7 +718,9 @@ class DreamBoothDataset(BaseDataset):
       self.bucket_no_upscale = False
 
     def read_caption(img_path):
-      # captionの候補ファイル名を作る
+      """
+      caption就是图片的tags文件, 一般是"图片命.txt"
+      """
       base_name = os.path.splitext(img_path)[0]
       base_name_face_det = base_name
       tokens = base_name.split("_")
@@ -731,10 +743,14 @@ class DreamBoothDataset(BaseDataset):
       return caption
 
     def load_dreambooth_dir(dir):
+      """
+      return: (repeat数, img_paths, tag文件_paths)
+      """
       if not os.path.isdir(dir):
         # print(f"ignore file: {dir}")
         return 0, [], []
 
+      # eg: 8_pantyhose, 就是repeat 8次
       tokens = os.path.basename(dir).split('_')
       try:
         n_repeats = int(tokens[0])
@@ -752,26 +768,30 @@ class DreamBoothDataset(BaseDataset):
         cap_for_img = read_caption(img_path)
         captions.append(caption_by_folder if cap_for_img is None else cap_for_img)
 
-      self.set_tag_frequency(os.path.basename(dir), captions)         # タグ頻度を記録
+      self.set_tag_frequency(os.path.basename(dir), captions)         # 记录tag的出现频率
 
       return n_repeats, img_paths, captions
 
     print("prepare train images.")
-    train_dirs = os.listdir(train_data_dir)
+    train_dirs = os.listdir(train_data_dir) # eg: 'train_data_dir = ./train/pantyhose4'则 train_dirs为里面的文件夹
     num_train_images = 0
     for dir in train_dirs:
       n_repeats, img_paths, captions = load_dreambooth_dir(os.path.join(train_data_dir, dir))
       num_train_images += n_repeats * len(img_paths)
 
+      # 每个ImgInfo都放在 image_data[img_path] 中
       for img_path, caption in zip(img_paths, captions):
         info = ImageInfo(img_path, n_repeats, caption, False, img_path)
         self.register_image(info)
 
+      # dataset_dirs_info['6_white_legwear'] = {"n_repeats": 6, "img_count": 100}
+      # dataset_dirs_info['6_black_legwear'] = {"n_repeats": 6, "img_count": 50}
       self.dataset_dirs_info[os.path.basename(dir)] = {"n_repeats": n_repeats, "img_count": len(img_paths)}
 
     print(f"{num_train_images} train images with repeating.")
     self.num_train_images = num_train_images
 
+    # 后面都是正则化相关的逻辑
     # reg imageは数を数えて学習画像と同じ枚数にする
     num_reg_images = 0
     if reg_data_dir:
@@ -1806,6 +1826,9 @@ def load_tokenizer(args: argparse.Namespace):
 
 
 def prepare_accelerator(args: argparse.Namespace):
+  """
+  返回加速器,简单加点参数wrap一层罢了. Accelerator为第三方的包
+  """
   if args.logging_dir is None:
     log_with = None
     logging_dir = None

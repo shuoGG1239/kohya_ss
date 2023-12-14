@@ -39,12 +39,14 @@ def train(args):
                                     args.bucket_reso_steps, args.bucket_no_upscale,
                                     args.prior_loss_weight, args.flip_aug, args.color_aug, args.face_crop_aug_range, args.random_crop, args.debug_dataset)
 
+  # 用不到,不看
   if args.no_token_padding:
     train_dataset.disable_token_padding()
 
-  # 学習データのdropout率を設定する
+  # Dropout可以比较有效的缓解过拟合的发生，在一定程度上达到正则化的效果。
   train_dataset.set_caption_dropout(args.caption_dropout_rate, args.caption_dropout_every_n_epochs, args.caption_tag_dropout_rate)
 
+  # 分桶
   train_dataset.make_buckets()
 
   if args.debug_dataset:
@@ -54,6 +56,7 @@ def train(args):
   # acceleratorを準備する
   print("prepare accelerator")
 
+  # 默认是0, 不管
   if args.gradient_accumulation_steps > 1:
     print(f"gradient_accumulation_steps is {args.gradient_accumulation_steps}. accelerate does not support gradient_accumulation_steps when training multiple models (U-Net and Text Encoder), so something might be wrong")
     print(

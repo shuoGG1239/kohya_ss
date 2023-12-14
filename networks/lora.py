@@ -34,17 +34,17 @@ class LoRAModule(torch.nn.Module):
       self.lora_up = torch.nn.Linear(lora_dim, out_dim, bias=False)
 
     if type(alpha) == torch.Tensor:
-      alpha = alpha.detach().float().numpy()                              # without casting, bf16 causes error
+      alpha = alpha.detach().float().numpy()  # without casting, bf16 causes error
     alpha = lora_dim if alpha is None or alpha == 0 else alpha
     self.scale = alpha / self.lora_dim
-    self.register_buffer('alpha', torch.tensor(alpha))                    # 定数として扱える
+    self.register_buffer('alpha', torch.tensor(alpha))  # 定数として扱える
 
     # same as microsoft's
     torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
     torch.nn.init.zeros_(self.lora_up.weight)
 
     self.multiplier = multiplier
-    self.org_module = org_module                  # remove in applying
+    self.org_module = org_module  # remove in applying
 
   def apply_to(self):
     self.org_forward = self.org_module.forward
@@ -57,7 +57,7 @@ class LoRAModule(torch.nn.Module):
 
 def create_network(multiplier, network_dim, network_alpha, vae, text_encoder, unet, **kwargs):
   if network_dim is None:
-    network_dim = 4                     # default
+    network_dim = 4  # default
   network = LoRANetwork(text_encoder, unet, multiplier=multiplier, lora_dim=network_dim, alpha=network_alpha)
   return network
 
@@ -101,15 +101,17 @@ class LoRANetwork(torch.nn.Module):
     # create module instances
     def create_modules(prefix, root_module: torch.nn.Module, target_replace_modules) -> List[LoRAModule]:
       loras = []
+      # 取出root_module的Linear或Conv2d层, 入参到LoRAModule转为Lora模块
       for name, module in root_module.named_modules():
         if module.__class__.__name__ in target_replace_modules:
           for child_name, child_module in module.named_modules():
-            if child_module.__class__.__name__ == "Linear" or (child_module.__class__.__name__ == "Conv2d" and child_module.kernel_size == (1, 1)):
+            if child_module.__class__.__name__ == "Linear" or (
+                child_module.__class__.__name__ == "Conv2d" and child_module.kernel_size == (1, 1)):
               lora_name = prefix + '.' + name + '.' + child_name
               lora_name = lora_name.replace('.', '_')
               lora = LoRAModule(lora_name, child_module, self.multiplier, self.lora_dim, self.alpha)
               loras.append(lora)
-      return loras
+      return loras  # 这里debug下?
 
     self.text_encoder_loras = create_modules(LoRANetwork.LORA_PREFIX_TEXT_ENCODER,
                                              text_encoder, LoRANetwork.TEXT_ENCODER_TARGET_REPLACE_MODULE)
@@ -130,7 +132,7 @@ class LoRANetwork(torch.nn.Module):
     self.multiplier = multiplier
     for lora in self.text_encoder_loras + self.unet_loras:
       lora.multiplier = self.multiplier
-      
+
   def load_weights(self, file):
     if os.path.splitext(file)[1] == '.safetensors':
       from safetensors.torch import load_file, safe_open
@@ -169,6 +171,7 @@ class LoRANetwork(torch.nn.Module):
     else:
       self.unet_loras = []
 
+    # 加载 clip 和 unet
     for lora in self.text_encoder_loras + self.unet_loras:
       lora.apply_to()
       self.add_module(lora.lora_name, lora)
