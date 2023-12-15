@@ -94,7 +94,7 @@ def train(args):
   weight_dtype, save_dtype = train_util.prepare_dtype(args)
 
   # モデルを読み込む
-  # 加载底模
+  # 加载底模 (CLIPTextModel, vae, unet)
   text_encoder, vae, unet, _ = train_util.load_target_model(args, weight_dtype)
 
   # work on low-ram device
@@ -352,11 +352,11 @@ def train(args):
 
     network.on_epoch_start(text_encoder, unet)  # 仅set train mode
 
-    for step, batch in enumerate(train_dataloader):
+    for step, batch in enumerate(train_dataloader):  # 一张图就是一个step
       with accelerator.accumulate(network):  # network: LoRANetwork or LohaModule etc
         with torch.no_grad():
           if "latents" in batch and batch["latents"] is not None:
-            latents = batch["latents"].to(accelerator.device)
+            latents = batch["latents"].to(accelerator.device)  # Tensor的to()方法会又返回值, Module则没有
           else:
             # latentに変換
             latents = vae.encode(batch["images"].to(dtype=weight_dtype)).latent_dist.sample()
@@ -365,11 +365,11 @@ def train(args):
 
         with torch.set_grad_enabled(train_text_encoder):
           # Get the text embedding for conditioning
-          input_ids = batch["input_ids"].to(accelerator.device)
+          input_ids = batch["input_ids"].to(accelerator.device)  # input_ids是embedding对应的索引
           encoder_hidden_states = train_util.get_hidden_states(args, input_ids, tokenizer, text_encoder, weight_dtype)
 
         # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents, device=latents.device)
+        noise = torch.randn_like(latents, device=latents.device)  # 随机噪声图片
         if args.noise_offset:
           # https://www.crosslabs.org//blog/diffusion-with-offset-noise
           noise += args.noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
@@ -421,7 +421,7 @@ def train(args):
         loss_total -= loss_list[step]
         loss_list[step] = current_loss
       loss_total += current_loss
-      avr_loss = loss_total / len(loss_list)
+      avr_loss = loss_total / len(loss_list)  # 平均Loss
       logs = {"loss": avr_loss}  # , "lr": lr_scheduler.get_last_lr()[0]}
       progress_bar.set_postfix(**logs)
 
@@ -461,6 +461,7 @@ def train(args):
 
     # end of epoch
 
+  # 所有epoch都训练结束了, 后面都是收尾
   metadata["ss_epoch"] = str(num_train_epochs)
   metadata["ss_training_finished_at"] = str(time.time())
 
@@ -483,7 +484,7 @@ def train(args):
     ckpt_file = os.path.join(args.output_dir, ckpt_name)
 
     print(f"save trained model to {ckpt_file}")
-    network.save_weights(ckpt_file, save_dtype, None if args.no_metadata else metadata)
+    network.save_weights(ckpt_file, save_dtype, None if args.no_metadata else metadata)  # torch.save(state_dict, file)
     print("model saved.")
 
 
