@@ -164,9 +164,8 @@ def train(args):
   trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
   optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
 
-  # dataloaderを準備する
-  # DataLoaderのプロセス数：0はメインプロセスになる
   n_workers = min(args.max_data_loader_n_workers, os.cpu_count() - 1)      # cpu_count-1 ただし最大で指定された数まで
+  # Dataloader用于使数据集能方便的"batching,shuffling,parallel loading", 要配合torch的Dataset使用(关键实现:__len__和__getitem__ )
   train_dataloader = torch.utils.data.DataLoader(
       train_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn, num_workers=n_workers, persistent_workers=args.persistent_data_loader_workers)
 
@@ -351,10 +350,10 @@ def train(args):
 
     metadata["ss_epoch"] = str(epoch+1)
 
-    network.on_epoch_start(text_encoder, unet)
+    network.on_epoch_start(text_encoder, unet)  # 仅set train mode
 
     for step, batch in enumerate(train_dataloader):
-      with accelerator.accumulate(network):
+      with accelerator.accumulate(network):  # network: LoRANetwork or LohaModule etc
         with torch.no_grad():
           if "latents" in batch and batch["latents"] is not None:
             latents = batch["latents"].to(accelerator.device)
