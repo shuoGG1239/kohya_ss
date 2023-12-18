@@ -127,7 +127,7 @@ def train(args):
   net_kwargs = {}
   if args.network_args is not None:
     for net_arg in args.network_args:
-      key, value = net_arg.split('=') # algo='loha';conv_dim=4;conv_alpha=4
+      key, value = net_arg.split('=') # eg: algo='loha';conv_dim=4;conv_alpha=4
       net_kwargs[key] = value
 
   # if a new network is added in future, add if ~ then blocks for each network (;'∀')
@@ -161,8 +161,9 @@ def train(args):
   # 学習に必要なクラスを準備する
   print("prepare optimizer, data loader etc.")
 
-  trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
-  optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
+  # 优化器相关
+  trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr) # nn.Module的parameters()
+  optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)  # Adam8bit, Lion
 
   n_workers = min(args.max_data_loader_n_workers, os.cpu_count() - 1)      # cpu_count-1 ただし最大で指定された数まで
   # Dataloader用于使数据集能方便的"batching,shuffling,parallel loading", 要配合torch的Dataset使用(关键实现:__len__和__getitem__ )

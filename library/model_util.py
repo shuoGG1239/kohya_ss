@@ -858,7 +858,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path):
         key_reps.append((key, new_key))
 
   for key, new_key in key_reps:
-    state_dict[new_key] = state_dict[key]
+    state_dict[new_key] = state_dict[key]  # todo debug看看state_dict
     del state_dict[key]
 
   return checkpoint, state_dict

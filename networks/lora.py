@@ -100,8 +100,12 @@ class LoRANetwork(torch.nn.Module):
 
     # create module instances
     def create_modules(prefix, root_module: torch.nn.Module, target_replace_modules) -> List[LoRAModule]:
+      """
+      root_module: 底模的text_encoder或者unet
+      (这里是LoRANetwork的方法, 不是LoRAModule! 这里并没有递归)
+      """
       loras = []
-      # 取出root_module的Linear或Conv2d层, 入参到LoRAModule转为Lora模块
+      # 取出root_module的Linear或Conv2d层, 转为LoRAModule模块
       for name, module in root_module.named_modules():
         if module.__class__.__name__ in target_replace_modules:
           for child_name, child_module in module.named_modules():
@@ -136,12 +140,12 @@ class LoRANetwork(torch.nn.Module):
   def load_weights(self, file):
     if os.path.splitext(file)[1] == '.safetensors':
       from safetensors.torch import load_file, safe_open
-      self.weights_sd = load_file(file)
+      self.weights_sd = load_file(file)  # Dict[str, torch.Tensor]
     else:
       self.weights_sd = torch.load(file, map_location='cpu')
 
   def apply_to(self, text_encoder, unet, apply_text_encoder=None, apply_unet=None):
-    if self.weights_sd:
+    if self.weights_sd:  # 基于已有的lora权重
       weights_has_text_encoder = weights_has_unet = False
       for key in self.weights_sd.keys():
         if key.startswith(LoRANetwork.LORA_PREFIX_TEXT_ENCODER):

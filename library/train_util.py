@@ -719,7 +719,7 @@ class DreamBoothDataset(BaseDataset):
 
     def read_caption(img_path):
       """
-      caption就是图片的tags文件, 一般是"图片命.txt"
+      caption就是图片的tags文件, 一般是"图片名.txt"
       """
       base_name = os.path.splitext(img_path)[0]
       base_name_face_det = base_name
@@ -738,7 +738,7 @@ class DreamBoothDataset(BaseDataset):
               print(f"illegal char in file (not UTF-8) / ファイルにUTF-8以外の文字があります: {cap_path}")
               raise e
             assert len(lines) > 0, f"caption file is empty / キャプションファイルが空です: {cap_path}"
-            caption = lines[0].strip()
+            caption = lines[0].strip()  # 为什么只取第一行?
           break
       return caption
 
@@ -768,7 +768,7 @@ class DreamBoothDataset(BaseDataset):
         cap_for_img = read_caption(img_path)
         captions.append(caption_by_folder if cap_for_img is None else cap_for_img)
 
-      self.set_tag_frequency(os.path.basename(dir), captions)         # 记录tag的出现频率
+      self.set_tag_frequency(os.path.basename(dir), captions)         # 记录tag的出现频率, 放在self.tag_frequency
 
       return n_repeats, img_paths, captions
 
@@ -1584,7 +1584,7 @@ def get_optimizer(args, trainable_params):
       optimizer_kwargs[key] = value
   # print("optkwargs:", optimizer_kwargs)
 
-  lr = args.learning_rate
+  lr = args.learning_rate  # learning_rate: 如果设置了unet_lr和text_encoder_lr时，该参数失效
 
   if optimizer_type == "AdamW8bit".lower():
     try:
