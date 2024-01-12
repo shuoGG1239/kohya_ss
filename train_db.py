@@ -21,7 +21,7 @@ from library.train_util import DreamBoothDataset
 def collate_fn(examples):
   return examples[0]
 
-
+# 跟train_network的逻辑基本一样, 精简了一些参数. 可以不看, 直接看train_network即可
 def train(args):
   train_util.verify_training_args(args)
   train_util.prepare_dataset_args(args, False)

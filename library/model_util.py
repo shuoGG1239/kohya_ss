@@ -382,6 +382,9 @@ def convert_ldm_unet_checkpoint(v2, checkpoint, config):
 
 
 def convert_ldm_vae_checkpoint(checkpoint, config):
+  """
+  vae的key都是'first_stage_model'开头
+  """
   # extract state dict for VAE
   vae_state_dict = {}
   vae_key = "first_stage_model."
@@ -550,7 +553,7 @@ def create_vae_diffusers_config():
   )
   return config
 
-
+# ldm: latent diffusion model
 def convert_ldm_clip_checkpoint_v1(checkpoint):
   keys = list(checkpoint.keys())
   text_model_dict = {}
@@ -850,6 +853,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path):
       state_dict = checkpoint
       checkpoint = None
 
+  # 针对一些key取错名的模型, 替换下key名
   key_reps = []
   for rep_from, rep_to in TEXT_ENCODER_KEY_REPLACEMENTS:
     for key in state_dict.keys():

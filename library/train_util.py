@@ -504,7 +504,7 @@ class BaseDataset(torch.utils.data.Dataset):
   def cache_latents(self, vae):
     # TODO ここを高速化したい
     print("caching latents.")
-    for info in tqdm(self.image_data.values()):
+    for info in tqdm(self.image_data.values()): # info是ImageInfo
       if info.latents_npz is not None:
         info.latents = self.load_latents_from_npz(info, False)
         info.latents = torch.FloatTensor(info.latents)
@@ -524,7 +524,7 @@ class BaseDataset(torch.utils.data.Dataset):
         image = image[:, ::-1].copy()     # cannot convert to Tensor without copy
         img_tensor = self.image_transforms(image)
         img_tensor = img_tensor.unsqueeze(0).to(device=vae.device, dtype=vae.dtype)
-        info.latents_flipped = vae.encode(img_tensor).latent_dist.sample().squeeze(0).to("cpu")
+        info.latents_flipped = vae.encode(img_tensor).latent_dist.sample().squeeze(0).to("cpu")  # img做vaeEncode生成latents
 
   def get_image_size(self, image_path):
     image = Image.open(image_path)
@@ -955,6 +955,9 @@ class FineTuningDataset(BaseDataset):
         image_info.latents_npz = image_info.latents_npz_flipped = None
 
   def image_key_to_npz_file(self, image_key):
+    """
+    若目录下存在 xxx.npz 则返回
+    """
     base_name = os.path.splitext(image_key)[0]
     npz_file_norm = base_name + '.npz'
 

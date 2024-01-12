@@ -101,8 +101,13 @@ class LoRANetwork(torch.nn.Module):
     # create module instances
     def create_modules(prefix, root_module: torch.nn.Module, target_replace_modules) -> List[LoRAModule]:
       """
+      核心方法, 就是将底模的Linear(或Conv2d)层取出, 这些取出的参数就是本次想训练的权重!
+      后面apply_to会将这些层进行加载(add_module);
+
       root_module: 底模的text_encoder或者unet
       (这里是LoRANetwork的方法, 不是LoRAModule! 这里并没有递归)
+
+      return list<LoRAModule>
       """
       loras = []
       # 取出root_module的Linear或Conv2d层, 转为LoRAModule模块
@@ -115,12 +120,14 @@ class LoRANetwork(torch.nn.Module):
               lora_name = lora_name.replace('.', '_')
               lora = LoRAModule(lora_name, child_module, self.multiplier, self.lora_dim, self.alpha)
               loras.append(lora)
-      return loras  # 这里debug下?
+      return loras  # create_modules的return (这里debug下?)
 
+    # 将底模clip的Linear(或Conv2d)层取出, 就是text_encoder_loras, 即本次想训练的权重
     self.text_encoder_loras = create_modules(LoRANetwork.LORA_PREFIX_TEXT_ENCODER,
                                              text_encoder, LoRANetwork.TEXT_ENCODER_TARGET_REPLACE_MODULE)
     print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
 
+    # 将底模unet的Linear(或Conv2d)层取出, unet_loras, 即本次想训练的权重
     self.unet_loras = create_modules(LoRANetwork.LORA_PREFIX_UNET, unet, LoRANetwork.UNET_TARGET_REPLACE_MODULE)
     print(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")
 

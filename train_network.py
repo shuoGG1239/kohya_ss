@@ -53,6 +53,7 @@ def train(args):
   if args.seed is not None:
     set_seed(args.seed)
 
+  # tokenizer(默认是clip模型)用于train_util的get_input_ids, 根据提示词获得对应的input_ids
   tokenizer = train_util.load_tokenizer(args)
 
   # データセットを準備する
@@ -132,6 +133,7 @@ def train(args):
 
   # if a new network is added in future, add if ~ then blocks for each network (;'∀')
   # create_network(1.0, 128, 128, vae, clip, unet, net_kwargs)
+  # network就是最终想得到的模型, 目前是初始化的空壳, 后面训练是给这network不断调整权重(具体点应该是self.text_encoder_loras和self.unet_loras)
   network = network_module.create_network(1.0, args.network_dim, args.network_alpha, vae, text_encoder, unet, **net_kwargs)
   if network is None:
     return
@@ -176,6 +178,7 @@ def train(args):
     print(f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}")
 
   # lr schedulerを用意する
+  # 学习率曲线: "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
   lr_scheduler = train_util.get_scheduler_fix(args.lr_scheduler, optimizer, num_warmup_steps=args.lr_warmup_steps,
                                               num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
                                               num_cycles=args.lr_scheduler_num_cycles, power=args.lr_scheduler_power)
@@ -357,21 +360,22 @@ def train(args):
       with accelerator.accumulate(network):  # network: LoRANetwork or LohaModule etc
         with torch.no_grad():
           if "latents" in batch and batch["latents"] is not None:
+            # 见train_util.py的info.latents, 其实latents就是vae.encode(img)
             latents = batch["latents"].to(accelerator.device)  # Tensor的to()方法会又返回值, Module则没有
           else:
-            # latentに変換
+            # latent_dist是latents分布, sample()则是抽取其中一个latent向量
             latents = vae.encode(batch["images"].to(dtype=weight_dtype)).latent_dist.sample()
-          latents = latents * 0.18215
+          latents = latents * 0.18215  # latent缩小
         b_size = latents.shape[0]
 
         with torch.set_grad_enabled(train_text_encoder):
           # Get the text embedding for conditioning
-          input_ids = batch["input_ids"].to(accelerator.device)  # input_ids是embedding对应的索引
+          input_ids = batch["input_ids"].to(accelerator.device)  # input_ids是embedding_words对应的索引
           encoder_hidden_states = train_util.get_hidden_states(args, input_ids, tokenizer, text_encoder, weight_dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, device=latents.device)  # 随机噪声图片
-        if args.noise_offset:
+        if args.noise_offset: # 在训练中添加噪声偏移来改良生成非常暗或者非常亮的图像，如果启用，推荐参数为 0.1
           # https://www.crosslabs.org//blog/diffusion-with-offset-noise
           noise += args.noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
 
@@ -379,42 +383,44 @@ def train(args):
         timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (b_size,), device=latents.device)
         timesteps = timesteps.long()
 
-        # Add noise to the latents according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
+        # Add noise to the latents according to the noise magnitude at each timestep (this is the forward diffusion process)
+        # 给latents加噪
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
         with accelerator.autocast():
+          # 正向传播得到预测值的noise
           noise_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
         if args.v_parameterization:
           # v-parameterization training
           target = noise_scheduler.get_velocity(latents, noise, timesteps)
         else:
-          target = noise
+          target = noise  # 实际的noise
 
+        # 实际的noise和预测的noise做mse_loss (平均方差), loss是Tensor
         loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
         loss = loss.mean([1, 2, 3])
 
-        loss_weights = batch["loss_weights"]                      # 各sampleごとのweight
-        loss = loss * loss_weights
+        loss_weights = batch["loss_weights"]  # 各sampleごとのweight, 目前loss_weights默认是全1, 所以没影响
+        loss = loss * loss_weights            # loss_weights固定全1.0
+        loss = loss.mean()                    # 平均なのでbatch_sizeで割る必要なし
 
-        loss = loss.mean()                # 平均なのでbatch_sizeで割る必要なし
-
-        accelerator.backward(loss)
+        accelerator.backward(loss)  # 反向传播
         if accelerator.sync_gradients and args.max_grad_norm != 0.0:
           params_to_clip = network.get_trainable_params()
           accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad(set_to_none=True)
+        optimizer.step()     # 根据梯度更新权重
+        lr_scheduler.step()  # 调整学习率
+        optimizer.zero_grad(set_to_none=True)  # 清空梯度
 
       # Checks if the accelerator has performed an optimization step behind the scenes
-      if accelerator.sync_gradients:
+      if accelerator.sync_gradients: # 同步的,所以可以确认这一步已完成 (sync_gradients是一个配置而不是状态)
         progress_bar.update(1)
         global_step += 1
 
+      # 后面这一堆操作都是打日志统计用
       current_loss = loss.detach().item()
       if epoch == 0:
         loss_list.append(current_loss)
@@ -437,7 +443,7 @@ def train(args):
       logs = {"loss/epoch": loss_total / len(loss_list)}
       accelerator.log(logs, step=epoch+1)
 
-    accelerator.wait_for_everyone()
+    accelerator.wait_for_everyone()  # 等待权重更新完,梯度清完
 
     if args.save_every_n_epochs is not None:
       model_name = train_util.DEFAULT_EPOCH_NAME if args.output_name is None else args.output_name
@@ -447,8 +453,11 @@ def train(args):
         ckpt_file = os.path.join(args.output_dir, ckpt_name)
         metadata["ss_training_finished_at"] = str(time.time())
         print(f"saving checkpoint: {ckpt_file}")
+        # accelerator.prepare得到的模型需要做unwrap_model
+        # https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.unwrap_model.example
         unwrap_model(network).save_weights(ckpt_file, save_dtype, None if args.no_metadata else metadata)
 
+      # 简单的os.remove, 可不看
       def remove_old_func(old_epoch_no):
         old_ckpt_name = train_util.EPOCH_FILE_NAME.format(model_name, old_epoch_no) + '.' + args.save_model_as
         old_ckpt_file = os.path.join(args.output_dir, old_ckpt_name)
@@ -456,8 +465,10 @@ def train(args):
           print(f"removing old checkpoint: {old_ckpt_file}")
           os.remove(old_ckpt_file)
 
+      # 持久化模型 (根据num_train_epochs是否需要持久化, 顺便返回给saving bool)
       saving = train_util.save_on_epoch_end(args, save_func, remove_old_func, epoch + 1, num_train_epochs)
       if saving and args.save_state:
+        # 保存训练状态(默认不保存), 输出到文件夹"<output_name>-<epoch_no>-state"
         train_util.save_state_on_epoch_end(args, accelerator, model_name, epoch + 1)
 
     # end of epoch
@@ -473,6 +484,7 @@ def train(args):
   accelerator.end_training()
 
   if args.save_state:
+    # 保存当前的 states of the model, optimizer, scaler, RNG generators, and registered objects, 到文件夹
     train_util.save_state_on_train_end(args, accelerator)
 
   del accelerator                         # この後メモリを使うのでこれは消す
