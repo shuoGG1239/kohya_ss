@@ -32,6 +32,9 @@ def save_to_file(file_name, model, state_dict, dtype):
 
 
 def merge_to_sd_model(text_encoder, unet, models, ratios, merge_dtype):
+  """
+  将lora模型(models)都merge到text_encoder和unet, 就是根据lora模型, 修改text_encoder和unet每个linear层的权重
+  """
   text_encoder.to(merge_dtype)
   unet.to(merge_dtype)
 
@@ -39,10 +42,10 @@ def merge_to_sd_model(text_encoder, unet, models, ratios, merge_dtype):
   name_to_module = {}
   for i, root_module in enumerate([text_encoder, unet]):
     if i == 0:
-      prefix = lora.LoRANetwork.LORA_PREFIX_TEXT_ENCODER
+      prefix = lora.LoRANetwork.LORA_PREFIX_TEXT_ENCODER  # "lora_te"
       target_replace_modules = lora.LoRANetwork.TEXT_ENCODER_TARGET_REPLACE_MODULE
     else:
-      prefix = lora.LoRANetwork.LORA_PREFIX_UNET
+      prefix = lora.LoRANetwork.LORA_PREFIX_UNET  # "lora_unet"
       target_replace_modules = lora.LoRANetwork.UNET_TARGET_REPLACE_MODULE
 
     for name, module in root_module.named_modules():
